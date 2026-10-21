@@ -2,8 +2,8 @@
 evaluate_generalization.py
 
 Evaluates Cross-Project Generalization (RQ3):
-Tests whether a ranking model trained on Cloudify
-can prioritize tests on Graylog without retraining.
+Tests whether a ranking model trained on Cloudify can prioritize tests 
+on Graylog without retraining, comparing raw duration vs. normalized duration.
 """
 
 import sys
@@ -28,7 +28,7 @@ def run_cross_project_evaluation():
         "recency"
     ]
 
-    # 1. Train Model strictly on Cloudify data
+    # 1. Train model strictly on Cloudify data
     print("Training LightGBM model on Cloudify...")
     df_cloudify = df_cloudify.sort_values(by=["build_step"]).reset_index(drop=True)
     train_groups = df_cloudify.groupby("build_id", sort=False).size().to_numpy()
@@ -48,7 +48,8 @@ def run_cross_project_evaluation():
 
     results = {
         "Random Baseline": {"apfd": [], "apfdc": []},
-        "Cross-Project LTR (Trained Cloudify -> Tested Graylog)": {"apfd": [], "apfdc": []}
+        "Cross-Project LTR (Raw Duration)": {"apfd": [], "apfdc": []},
+        "Cross-Project LTR (Normalized Duration)": {"apfd": [], "apfdc": []}
     }
 
     for b_id in failing_graylog_builds:
@@ -56,32 +57,51 @@ def run_cross_project_evaluation():
         if len(b_df) < 2:
             continue
 
-        # Baseline: Random
+        # Strategy 1: Random Baseline
         rand_df = b_df.sample(frac=1.0, random_state=42)
         results["Random Baseline"]["apfd"].append(compute_apfd(rand_df["target"].tolist()))
         results["Random Baseline"]["apfdc"].append(
             compute_apfdc(rand_df["target"].tolist(), rand_df["duration"].tolist())
         )
 
-        # Proposed: Cross-Project ML Ranking
         pred_scores = ranker.predict(b_df[feature_cols])
-        b_df["rank_score"] = pred_scores / (b_df["mean_duration_last5"] + 1e-4)
-        ml_df = b_df.sort_values(by="rank_score", ascending=False)
-        results["Cross-Project LTR (Trained Cloudify -> Tested Graylog)"]["apfd"].append(
-            compute_apfd(ml_df["target"].tolist())
+
+        # Strategy 2: Cross-Project Raw Duration Division
+        b_df["score_raw"] = pred_scores / (b_df["mean_duration_last5"] + 1e-4)
+        raw_df = b_df.sort_values(by="score_raw", ascending=False)
+        results["Cross-Project LTR (Raw Duration)"]["apfd"].append(
+            compute_apfd(raw_df["target"].tolist())
         )
-        results["Cross-Project LTR (Trained Cloudify -> Tested Graylog)"]["apfdc"].append(
-            compute_apfdc(ml_df["target"].tolist(), ml_df["duration"].tolist())
+        results["Cross-Project LTR (Raw Duration)"]["apfdc"].append(
+            compute_apfdc(raw_df["target"].tolist(), raw_df["duration"].tolist())
         )
 
-    print("\n" + "=" * 78)
+        # Strategy 3: Cross-Project Normalized Duration (Within-build relative cost)
+        dur_min = b_df["mean_duration_last5"].min()
+        dur_max = b_df["mean_duration_last5"].max()
+        if dur_max > dur_min:
+            norm_dur = (b_df["mean_duration_last5"] - dur_min) / (dur_max - dur_min)
+        else:
+            norm_dur = np.zeros(len(b_df))
+        
+        # Relative cost weighting
+        b_df["score_norm"] = pred_scores / (1.0 + norm_dur)
+        norm_df = b_df.sort_values(by="score_norm", ascending=False)
+        results["Cross-Project LTR (Normalized Duration)"]["apfd"].append(
+            compute_apfd(norm_df["target"].tolist())
+        )
+        results["Cross-Project LTR (Normalized Duration)"]["apfdc"].append(
+            compute_apfdc(norm_df["target"].tolist(), norm_df["duration"].tolist())
+        )
+
+    print("\n" + "=" * 82)
     print(f"{'EVALUATION STRATEGY (RQ3)':<55} | {'APFD':<8} | {'APFDc':<8}")
-    print("=" * 78)
+    print("=" * 82)
     for strat, scores in results.items():
         m_apfd = np.mean(scores["apfd"]) if len(scores["apfd"]) > 0 else 0.0
         m_apfdc = np.mean(scores["apfdc"]) if len(scores["apfdc"]) > 0 else 0.0
         print(f"{strat:<55} | {m_apfd:<8.4f} | {m_apfdc:<8.4f}")
-    print("=" * 78)
+    print("=" * 82)
 
 if __name__ == "__main__":
     run_cross_project_evaluation()
