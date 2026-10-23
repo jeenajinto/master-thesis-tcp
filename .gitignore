@@ -1,26 +1,23 @@
 # Python & Virtual Environments
 __pycache__/
 *.py[cod]
-*$py.class
 .venv/
 env/
-venv/
-
-# Jupyter & IDE
-.ipynb_checkpoints/
-.vscode/
-.idea/
 
 # Operating System Files
 .DS_Store
 Thumbs.db
 
-# Data & Models (Excluded from Git due to file size)
+# Exclude large raw and processed datasets (>50MB / 100MB)
 data/raw/*
-data/interim/*
 data/processed/*
-!data/**/.gitkeep
 *.parquet
+
+# Explicitly keep folder structure and preview samples
+!data/**/.gitkeep
+!data/raw/*_sample.csv
+!data/processed/*_sample.csv
+
+# Models
 models/*.pkl
 models/*.joblib
-models/*.txt
